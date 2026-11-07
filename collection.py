@@ -1,33 +1,28 @@
 
 import json
-import shutil
 from pathlib import Path
 
 from sprites import ALL_SPRITES, get_sprite, normalize_name
+SUPPORTED_SEASON = "C7S5"
 
 
-# ============================================================
+# --------------------------------------------------
 # COLLECTION SETTINGS
-# ============================================================
+# --------------------------------------------------
 
 DATA_FILE = Path(__file__).parent / "data" / "collection.json"
-BACKUP_FILE = DATA_FILE.with_suffix(".bak")
 
-TEMP_FILE = DATA_FILE.with_suffix(".tmp")
-TEMP_BACKUP_FILE = BACKUP_FILE.with_suffix(".tmp")
-
-SAFETY_FILE = DATA_FILE.with_name("collection.pre_restore.json")
-SAFETY_TEMP_FILE = DATA_FILE.with_name("collection.pre_restore.tmp")
-
-CURRENT_SEASON = "C7S5"
-COLLECTION_VERSION = 1
+SAVE_FORMAT_VERSION = 2
 
 STATUSES = ["Unmastered", "Mastered", "Level 5"]
 
+# The collection starts empty until load_collection() is called.
+collection = {"owned": []}
 
-# ============================================================
+
+# --------------------------------------------------
 # VALIDATION
-# ============================================================
+# --------------------------------------------------
 
 def find_variant(sprite, variant_name):
     """Find a variant belonging to a Sprite."""
@@ -39,15 +34,10 @@ def find_variant(sprite, variant_name):
     return None
 
 
-def validate_sprite(name):
-    """Check whether a Sprite exists."""
+def validate_sprite(sprite_name):
+    """Check whether a Sprite exists in the database."""
 
-    sprite = get_sprite(name)
-
-    if sprite is None:
-        raise ValueError(f"Unknown Sprite: {name}")
-
-    return sprite
+    return get_sprite(sprite_name)
 
 
 def validate_variant(sprite, variant_name):
@@ -55,13 +45,8 @@ def validate_variant(sprite, variant_name):
 
     variant = find_variant(sprite, variant_name)
 
-    if variant is None:
-        raise ValueError(
-            f"{variant_name} is not a valid variant of {sprite.name}."
-        )
-
-    if variant.status != "Available":
-        raise ValueError(f"{variant.name} is not currently available.")
+    if variant is None or variant.status != "Available":
+        return None
 
     return variant
 
@@ -69,312 +54,153 @@ def validate_variant(sprite, variant_name):
 def validate_status(status):
     """Check whether a mastery status is valid."""
 
-    if status not in STATUSES:
-        raise ValueError(f"Invalid mastery status: {status}")
-
-    return status
+    return status in STATUSES
 
 
 def validate_save_data(data):
-    """Validate the structure of a collection save."""
+    """Validate the structure of a collection save file."""
 
     if not isinstance(data, dict):
-        raise ValueError("Collection must be a JSON object.")
+        raise ValueError("Collection data must be a dictionary.")
 
-    season = data.get("season")
+    if not isinstance(data.get("season"), str):
+        raise ValueError("Collection is missing valid season metadata.")
+
     version = data.get("version")
-    owned = data.get("owned")
-
-    if not isinstance(season, str) or not season:
-        raise ValueError("Missing or invalid collection season.")
 
     if type(version) is not int or version < 1:
-        raise ValueError("Missing or invalid save version.")
+        raise ValueError("Collection has an invalid save format version.")
 
-    if not isinstance(owned, list):
-        raise ValueError("Invalid owned collection data.")
+    if not isinstance(data.get("owned"), list):
+        raise ValueError("Collection is missing a valid owned list.")
 
-    for entry in owned:
+    for entry in data["owned"]:
         if not isinstance(entry, dict):
-            raise ValueError("Invalid collection entry.")
+            raise ValueError("Collection contains an invalid entry.")
 
-        if not all(
-            isinstance(entry.get(key), str)
-            for key in ["name", "variant", "status"]
-        ):
-            raise ValueError("Invalid collection entry fields.")
+        for field in ("name", "variant", "status"):
+            if not isinstance(entry.get(field), str):
+                raise ValueError(f"Collection entry is missing {field}.")
 
-        validate_status(entry["status"])
+        if not validate_status(entry["status"]):
+            raise ValueError(
+                f"Invalid mastery status: {entry['status']}"
+            )
 
     return data
 
 
-def read_collection_file(path):
-    """Read and validate a collection JSON file."""
+def check_compatibility(data):
+    """Check whether a save file matches the current release."""
 
-    with open(path, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    if data["season"] != SUPPORTED_SEASON:
+        raise ValueError(
+            f"This collection belongs to {data['season']}, "
+            f"but this release supports {SUPPORTED_SEASON}."
+        )
 
-    return validate_save_data(data)
-
-
-def is_compatible(data):
-    """Check whether a collection matches this release."""
-
-    return (
-        data["season"] == CURRENT_SEASON
-        and data["version"] == COLLECTION_VERSION
-    )
+    if data["version"] != SAVE_FORMAT_VERSION:
+        raise ValueError(
+            f"This collection uses save format v{data['version']}, "
+            f"but this release requires v{SAVE_FORMAT_VERSION}."
+        )
 
 
-def describe_collection(data):
-    """Return a readable season and version label."""
+# --------------------------------------------------
+# LOADING AND SAVING
+# --------------------------------------------------
 
-    return f"{data['season']} v{data['version']}"
+def load_collection():
+    """Load the collection from its JSON file."""
 
-
-def get_file_description(path):
-    """Describe a collection file without modifying it."""
-
-    if not path.exists():
-        return "Not found"
-
-    try:
-        data = read_collection_file(path)
-        return describe_collection(data)
-
-    except (json.JSONDecodeError, ValueError, OSError):
-        return "Invalid or unreadable"
-
-
-# ============================================================
-# BACKUP MANAGEMENT
-# ============================================================
-
-def create_backup():
-    """Back up a valid, compatible collection."""
+    global collection
 
     if not DATA_FILE.exists():
-        return False
+        collection = {"owned": []}
+        return collection
 
-    data = read_collection_file(DATA_FILE)
+    with open(DATA_FILE, "r", encoding="utf-8") as file:
+        data = json.load(file)
 
-    if not is_compatible(data):
-        raise ValueError(
-            "Cannot back up an incompatible collection."
-        )
+    validate_save_data(data)
+    check_compatibility(data)
 
-    # Create a temporary backup first.
-    shutil.copy2(DATA_FILE, TEMP_BACKUP_FILE)
+    collection = {"owned": data["owned"]}
 
-    # Replace the previous backup only after copying succeeds.
-    TEMP_BACKUP_FILE.replace(BACKUP_FILE)
-
-    return True
+    return collection
 
 
-def backup_collection():
-    """Manually create a backup of the collection."""
-
-    try:
-        if create_backup():
-            print(f"Collection backup created: {BACKUP_FILE.name}")
-            return True
-
-        print("No collection file exists to back up.")
-        return False
-
-    except (json.JSONDecodeError, ValueError, OSError) as error:
-        print(f"Could not create backup: {error}")
-        return False
-
-
-def restore_backup():
-    """Restore a backup if it matches the current release."""
-
-    if not BACKUP_FILE.exists():
-        raise ValueError("No backup file exists.")
-
-    # Validate backup before touching the main collection.
-    backup_data = read_collection_file(BACKUP_FILE)
-
-    if not is_compatible(backup_data):
-        raise ValueError(
-            "The backup does not match the current season and version."
-        )
-
-    # Preserve the current main file before restoring.
-    if DATA_FILE.exists():
-        shutil.copy2(DATA_FILE, SAFETY_TEMP_FILE)
-        SAFETY_TEMP_FILE.replace(SAFETY_FILE)
-
-    # Copy backup to a temporary restore file.
-    restore_temp = DATA_FILE.with_suffix(".restore.tmp")
-
-    shutil.copy2(BACKUP_FILE, restore_temp)
-
-    # Replace the main collection only after copying succeeds.
-    restore_temp.replace(DATA_FILE)
-
-    print("\nBackup restored successfully!")
-    print(f"Restored collection: {describe_collection(backup_data)}")
-
-    if SAFETY_FILE.exists():
-        print(f"Previous collection preserved: {SAFETY_FILE.name}")
-
-    return backup_data
-
-
-# ============================================================
-# COLLECTION WRITING
-# ============================================================
-
-def write_collection(owned):
-    """Write collection data using the current save format."""
+def save_collection():
+    """Save the current collection to JSON."""
 
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     data = {
-        "season": CURRENT_SEASON,
-        "version": COLLECTION_VERSION,
-        "owned": owned
+        "season": SUPPORTED_SEASON,
+        "version": SAVE_FORMAT_VERSION,
+        "owned": collection["owned"]
     }
 
-    with open(TEMP_FILE, "w", encoding="utf-8") as file:
+    temp_file = DATA_FILE.with_suffix(".tmp")
+
+    with open(temp_file, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=4)
 
-    TEMP_FILE.replace(DATA_FILE)
+    temp_file.replace(DATA_FILE)
 
 
-def save_collection():
-    """Save the current collection."""
+# --------------------------------------------------
+# COLLECTION LOOKUP
+# --------------------------------------------------
 
-    write_collection(collection["owned"])
+def find_owned(sprite_name, variant_name):
+    """Find an owned Sprite variant."""
 
+    for entry in collection["owned"]:
+        if (
+            normalize_name(entry["name"]) == normalize_name(sprite_name)
+            and normalize_name(entry["variant"]) == normalize_name(variant_name)
+        ):
+            return entry
 
-# ============================================================
-# COMPATIBILITY SCREEN
-# ============================================================
-
-def compatibility_screen(problem):
-    """Display recovery options for an incompatible collection."""
-
-    backup_description = get_file_description(BACKUP_FILE)
-
-    print("\n" + "=" * 60)
-    print("                 COLLECTION MISMATCH")
-    print("=" * 60)
-
-    print(f"\nCollection file: {problem}")
-    print(
-        f"Current release: "
-        f"{CURRENT_SEASON} v{COLLECTION_VERSION}"
-    )
-    print(f"Backup file:     {backup_description}")
-
-    print("\nYour collection could not be loaded.")
-    print("Your original files will not be overwritten automatically.")
-
-    print("\nWhat would you like to do?")
-
-    while True:
-        print("\n1. Restore from backup")
-        print("2. Exit without making changes")
-
-        choice = input("\nSelect an option: ").strip()
-
-        if choice == "1":
-            try:
-                restored_data = restore_backup()
-                return {"owned": restored_data["owned"]}
-
-            except (json.JSONDecodeError, ValueError, OSError) as error:
-                print(f"\nCould not restore backup: {error}")
-                print("Your existing collection files were preserved.")
-
-        elif choice == "2":
-            print("\nExiting without making changes.")
-            raise SystemExit(0)
-
-        else:
-            print("Invalid selection. Please choose 1 or 2.")
+    return None
 
 
-# ============================================================
-# COLLECTION LOADING
-# ============================================================
-
-def load_collection():
-    """Load, validate, and back up the current collection."""
-
-    if not DATA_FILE.exists():
-        return {"owned": []}
-
-    try:
-        data = read_collection_file(DATA_FILE)
-
-    except (json.JSONDecodeError, ValueError, OSError) as error:
-        return compatibility_screen(
-            f"Invalid or unreadable ({error})"
-        )
-
-    # Check compatibility BEFORE creating a backup.
-    if not is_compatible(data):
-        return compatibility_screen(describe_collection(data))
-
-    # Only compatible collections can refresh the backup.
-    try:
-        create_backup()
-
-    except OSError as error:
-        raise ValueError(
-            f"Could not create collection backup: {error}"
-        ) from error
-
-    return {"owned": data["owned"]}
-
-
-# ============================================================
-# COLLECTION INITIALIZATION
-# ============================================================
-
-# Load collection when this module is imported.
-collection = load_collection()
-
-
-# ============================================================
-# SPRITE ADDITION LOGIC
-# ============================================================
+# --------------------------------------------------
+# ADDING SPRITES
+# --------------------------------------------------
 
 def _add_owned_entry(
     owned,
     sprite_name,
     variant_name,
     status,
-    require_available=False,
     announce=True
 ):
-    """Shared Sprite addition logic."""
+    """Validate and add an entry to an owned list."""
 
     sprite = validate_sprite(sprite_name)
-    variant = find_variant(sprite, variant_name)
+
+    if sprite is None:
+        print("Sprite not found.")
+        return False
+
+    variant = validate_variant(sprite, variant_name)
 
     if variant is None:
-        raise ValueError(
-            f"{variant_name} is not a valid variant of {sprite.name}."
-        )
+        print("Variant not found or currently unavailable.")
+        return False
 
-    if require_available and variant.status != "Available":
-        raise ValueError(f"{variant.name} is not currently available.")
+    if not validate_status(status):
+        print("Invalid mastery status.")
+        return False
 
-    validate_status(status)
-
-    # Prevent duplicate entries.
     for entry in owned:
         if (
             normalize_name(entry["name"]) == normalize_name(sprite.name)
             and normalize_name(entry["variant"]) == normalize_name(variant.name)
         ):
+            print("You already own this variant.")
             return False
 
     owned.append({
@@ -396,65 +222,55 @@ def add_sprite(sprite_name, variant_name, status="Unmastered"):
         collection["owned"],
         sprite_name,
         variant_name,
-        status,
-        require_available=True
+        status
     )
 
-    if not added:
-        print(f"You already own {sprite_name} - {variant_name}.")
-        return False
+    if added:
+        save_collection()
 
-    save_collection()
-    return True
+    return added
 
 
-# ============================================================
-# COLLECTION MANAGEMENT
-# ============================================================
+# --------------------------------------------------
+# UPDATING MASTERY
+# --------------------------------------------------
 
-def find_owned(sprite_name, variant_name):
-    """Find an owned Sprite variant."""
-
-    for entry in collection["owned"]:
-        if (
-            normalize_name(entry["name"]) == normalize_name(sprite_name)
-            and normalize_name(entry["variant"]) == normalize_name(variant_name)
-        ):
-            return entry
-
-    return None
-
-
-def update_status(sprite_name, variant_name, status):
-    """Update the mastery status of an owned variant."""
-
-    validate_status(status)
+def update_status(sprite_name, variant_name, new_status):
+    """Change the mastery status of an owned variant."""
 
     entry = find_owned(sprite_name, variant_name)
 
     if entry is None:
-        print("You do not own that Sprite variant.")
+        print("You do not own this variant.")
         return False
 
-    entry["status"] = status
+    if not validate_status(new_status):
+        print("Invalid mastery status.")
+        return False
+
+    entry["status"] = new_status
 
     save_collection()
 
     print(
         f"Updated {entry['name']} - {entry['variant']} "
-        f"to {status}."
+        f"to {new_status}"
     )
 
     return True
 
 
+# --------------------------------------------------
+# RECORDING TRADES
+# --------------------------------------------------
+
 def record_trade(sprite_name, variant_name):
-    """Record trading away an owned Sprite variant."""
+    """Record a trade involving an owned variant."""
 
     entry = find_owned(sprite_name, variant_name)
 
     if entry is None:
-        print("You do not own that Sprite variant.")
+        print("You do not own this variant.")
         return False
 
     if entry["status"] == "Level 5":
@@ -462,29 +278,37 @@ def record_trade(sprite_name, variant_name):
 
     save_collection()
 
-    print(f"Recorded trade: {entry['name']} - {entry['variant']}.")
+    print(
+        f"Recorded trade for {entry['name']} - {entry['variant']}"
+    )
+
     return True
 
 
+# --------------------------------------------------
+# REMOVING SPRITES
+# --------------------------------------------------
+
 def remove_sprite(sprite_name, variant_name):
-    """Remove a Sprite variant from the collection."""
+    """Remove an owned variant from the collection."""
 
     entry = find_owned(sprite_name, variant_name)
 
     if entry is None:
-        print("You do not own that Sprite variant.")
+        print("You do not own this variant.")
         return False
 
     collection["owned"].remove(entry)
 
     save_collection()
 
-    print(f"Removed {entry['name']} - {entry['variant']}.")
+    print(f"Removed {entry['name']} - {entry['variant']}")
+
     return True
 
 
 def reset_collection():
-    """Clear the entire collection."""
+    """Remove all owned variants."""
 
     collection["owned"].clear()
 
@@ -493,28 +317,25 @@ def reset_collection():
     print("Collection has been reset.")
 
 
-# ============================================================
-# COLLECTION INFORMATION
-# ============================================================
+# --------------------------------------------------
+# COLLECTION STATISTICS
+# --------------------------------------------------
 
 def get_available_variants():
-    """Return all currently available Sprite variants."""
+    """Return all currently obtainable Sprite variants."""
 
     available = []
 
     for sprite in ALL_SPRITES:
         for variant in sprite.variants:
             if variant.status == "Available":
-                available.append({
-                    "name": sprite.name,
-                    "variant": variant.name
-                })
+                available.append((sprite.name, variant.name))
 
     return available
 
 
 def get_collection_stats():
-    """Calculate collection ownership and mastery statistics."""
+    """Calculate collection completion and mastery statistics."""
 
     available = get_available_variants()
 
@@ -532,6 +353,7 @@ def get_collection_stats():
     )
 
     missing = total - owned
+
     percentage = (owned / total * 100) if total else 0
 
     return {
@@ -544,14 +366,12 @@ def get_collection_stats():
     }
 
 
-# ============================================================
-# TRADE ADVERTISEMENT GENERATOR
-# ============================================================
+# --------------------------------------------------
+# TRADE ADVERTISEMENT
+# --------------------------------------------------
 
 def generate_trade_ad():
     """Generate a text-based Sprite trade advertisement."""
-
-    available = get_available_variants()
 
     owned = set()
     unmastered = set()
@@ -571,81 +391,110 @@ def generate_trade_ad():
         elif entry["status"] == "Level 5":
             level_5.add(key)
 
+    available = get_available_variants()
+
     looking_for = []
     unmastered_list = []
     for_trade = []
 
-    for item in available:
+    for sprite_name, variant_name in available:
         key = (
-            normalize_name(item["name"]),
-            normalize_name(item["variant"])
+            normalize_name(sprite_name),
+            normalize_name(variant_name)
         )
 
         if key not in owned:
-            looking_for.append(item)
-
-    for entry in collection["owned"]:
-        key = (
-            normalize_name(entry["name"]),
-            normalize_name(entry["variant"])
-        )
+            looking_for.append((sprite_name, variant_name))
 
         if key in unmastered:
-            unmastered_list.append(entry)
+            unmastered_list.append((sprite_name, variant_name))
 
-        elif entry["status"] in ["Mastered", "Level 5"]:
-            for_trade.append(entry)
+        if key in owned and key not in unmastered:
+            for_trade.append((sprite_name, variant_name))
 
     def format_group(items, show_level_5=False):
-        """Group variants by Sprite name."""
+        """Group variants under their Sprite names."""
 
-        grouped = {}
+        groups = {}
 
-        for item in items:
-            name = item["name"]
-            variant = item["variant"]
-
-            if name not in grouped:
-                grouped[name] = []
-
-            display = variant
-
-            if show_level_5 and item["status"] == "Level 5":
-                display += " - Level 5"
-
-            grouped[name].append(display)
+        for sprite_name, variant_name in items:
+            groups.setdefault(sprite_name, []).append(variant_name)
 
         lines = []
 
-        for name, variants in grouped.items():
-            lines.append(f"{name}: {', '.join(variants)}")
+        for sprite_name, variants in groups.items():
+            lines.append(f"{sprite_name}: " + ", ".join(variants))
 
-        return lines
+            if show_level_5:
+                for variant_name in variants:
+                    key = (
+                        normalize_name(sprite_name),
+                        normalize_name(variant_name)
+                    )
 
-    ad = []
+                    if key in level_5:
+                        lines.append(f"  - {variant_name} - Level 5")
 
-    ad.append("LF:")
-    ad.extend(format_group(looking_for) or ["None"])
+        return "\n".join(lines) if lines else "None"
 
-    ad.append("")
-    ad.append("UNMASTERED:")
-    ad.extend(format_group(unmastered_list) or ["None"])
-
-    ad.append("")
-    ad.append("FT:")
-    ad.extend(format_group(for_trade, show_level_5=True) or ["None"])
-
-    return "\n".join(ad)
+    return (
+        "LF:\n"
+        + format_group(looking_for)
+        + "\n\nUNMASTERED:\n"
+        + format_group(unmastered_list)
+        + "\n\nFT:\n"
+        + format_group(for_trade, show_level_5=True)
+    )
 
 
-# ============================================================
-# COLLECTION DISPLAY
-# ============================================================
+# --------------------------------------------------
+# DISPLAY COLLECTION
+# --------------------------------------------------
+
+
+
+def generate_trade_ad():
+    """Generate structured Looking For, Unmastered, and For Trade lists."""
+
+    trade_ad = {
+        "LF": {},
+        "UNMASTERED": {},
+        "FT": {}
+    }
+
+    for sprite in ALL_SPRITES:
+
+        for variant in sprite.variants:
+
+            if variant.status != "Available":
+                continue
+
+            entry = find_owned(sprite.name, variant.name)
+
+            if entry is None:
+                category = "LF"
+
+            elif entry["status"] == "Unmastered":
+                category = "UNMASTERED"
+
+            elif entry["status"] in ("Mastered", "Level 5"):
+                category = "FT"
+
+            else:
+                continue
+
+            trade_ad[category].setdefault(sprite.name, []).append({
+                "name": variant.name,
+                "status": entry["status"] if entry else None
+            })
+
+    return trade_ad
 
 def display_collection():
-    """Display collection statistics and the trade advertisement."""
+    """Display collection statistics and condensed trade advertisement."""
 
     stats = get_collection_stats()
+    trade_ad = generate_trade_ad()
 
     print("\n" + "=" * 60)
     print("                    SPRITE TRADES")
@@ -656,10 +505,48 @@ def display_collection():
         f"({stats['percentage']:.1f}%)"
     )
 
-    print(f"Missing: {stats['missing']}")
-    print(f"Unmastered: {stats['unmastered']}")
-    print(f"Mastered: {stats['mastered']}/{stats['total']}")
+    print(
+        f"Missing: {stats['missing']} | "
+        f"Unmastered: {stats['unmastered']} | "
+        f"Mastered: {stats['mastered']}"
+    )
 
-    print("\n" + "-" * 60)
-    print(generate_trade_ad())
+    for category in ("LF", "UNMASTERED", "FT"):
+
+        entries = trade_ad[category]
+
+        count = sum(
+            len(variants)
+            for variants in entries.values()
+        )
+
+        print("\n" + "-" * 60)
+        print(f"{category} ({count})")
+        print("-" * 60)
+
+        if not entries:
+            print("None")
+            continue
+
+        for sprite_name, variants in entries.items():
+
+            formatted_variants = []
+
+            for variant in variants:
+
+                variant_name = variant["name"]
+                status = variant["status"]
+
+                if status == "Level 5":
+                    formatted_variants.append(
+                        f"{variant_name} (Level 5)"
+                    )
+                else:
+                    formatted_variants.append(variant_name)
+
+            print(
+                f"{sprite_name}: "
+                f"{', '.join(formatted_variants)}"
+            )
+
     print("-" * 60)
