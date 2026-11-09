@@ -1,349 +1,567 @@
+# ==========================================
+# SPRITE TRADE MANAGER
+# Version 1.3.0
+# ==========================================
 
-from sprites import ALL_SPRITES
+import backup
+import collection
+import sprites
 
-from collection import (
-    STATUSES,
-    collection,
-    display_collection,
-    add_sprite,
-    update_status,
-    record_trade,
-    remove_sprite,
-    reset_collection,
-    find_owned
-)
+# ==========================================
+# DISPLAY SETTINGS
+# ==========================================
 
-from backup import initialize_collection
+APP_NAME = "SPRITE TRADE MANAGER"
+APP_VERSION = "1.3.0"
 
-
-# --------------------------------------------------
-# APPLICATION INFORMATION
-# --------------------------------------------------
-
-APP_NAME = "Sprite Trade Manager"
-APP_VERSION = "1.1.0"
-SUPPORTED_SEASON = "C7S5"
+LINE = "=" * 55
+SHORT_LINE = "-" * 55
 
 
-# --------------------------------------------------
-# SELECTION HELPERS
-# --------------------------------------------------
+# ==========================================
+# GENERAL INPUT FUNCTIONS
+# ==========================================
 
-def choose_sprite():
-    """Display all Sprites and let the user select one."""
+def pause():
+    input("\nPress Enter to continue...")
 
-    print("\nAvailable Sprites:")
 
-    for index, sprite in enumerate(ALL_SPRITES, start=1):
-        print(f"{index}. {sprite.name}")
-
-    print("0. Cancel")
+def get_number(prompt):
+    """Request a valid whole number from the user."""
 
     while True:
-        choice = input("\nSelect a Sprite: ").strip()
+        value = input(prompt).strip()
 
-        if not choice.isdigit():
+        try:
+            return int(value)
+
+        except ValueError:
             print("Please enter a valid number.")
+
+
+def get_yes_no(prompt):
+    """Request a Yes or No answer."""
+
+    while True:
+        answer = input(prompt).strip().lower()
+
+        if answer in ("y", "yes"):
+            return True
+
+        if answer in ("n", "no"):
+            return False
+
+        print("Please enter Y or N.")
+
+
+def print_header(title):
+    print("\n" + LINE)
+    print(f"{title:^55}")
+    print(LINE)
+
+
+# ==========================================
+# CATALOG DISPLAY
+# ==========================================
+
+def display_catalog():
+    """Print every available numbered Sprite variant."""
+
+    print_header("SPRITE DATABASE")
+
+    variants = sprites.list_variants()
+
+    print(f"{sprites.count_sprites()} Sprites | "
+          f"{sprites.count_variants()} Variants\n")
+
+    for variant in variants:
+        print(f"{variant.number:>3}  {variant.display_name}")
+
+    print("\n" + SHORT_LINE)
+    print("Enter a Sprite number to inspect it.")
+    print("[0] Back")
+
+
+# ==========================================
+# SPRITE DATABASE
+# ==========================================
+
+def sprite_database_menu():
+    """Browse the catalog and inspect individual variants."""
+
+    while True:
+        display_catalog()
+
+        number = get_number("\nSprite number: ")
+
+        if number == 0:
+            return
+
+        variant = sprites.get_variant(number)
+
+        if variant is None:
+            print("That number is not in the Sprite database.")
+            pause()
             continue
 
-        choice = int(choice)
+        sprites.display_variant_info(
+            variant,
+            collection.collection
+        )
+
+        pause()
+
+
+# ==========================================
+# ADD SPRITE
+# ==========================================
+
+def add_sprite_menu():
+    """Add a numbered Sprite variant to the collection."""
+
+    while True:
+        print_header("ADD SPRITE")
+
+        print("1. Browse Sprite Database")
+        print("2. Enter Sprite Number")
+        print("0. Back")
+
+        choice = get_number("\nSelection: ")
 
         if choice == 0:
-            return None
+            return
 
-        if 1 <= choice <= len(ALL_SPRITES):
-            return ALL_SPRITES[choice - 1]
+        if choice == 1:
+            display_catalog()
 
-        print("Invalid selection.")
+        elif choice == 2:
+            pass
+
+        else:
+            print("Invalid selection.")
+            pause()
+            continue
+
+        number = get_number("\nSprite number (0 to cancel): ")
+
+        if number == 0:
+            continue
+
+        variant = sprites.get_variant(number)
+
+        if variant is None:
+            print("Invalid Sprite number.")
+            pause()
+            continue
+
+        if collection.is_owned(variant):
+            print("You already own this Sprite variant.")
+            pause()
+            continue
+
+        print(f"\nSelected: {variant.display_name}")
+
+        print("\nMastery Status")
+        print("1. Unmastered")
+        print("2. Mastered")
+        print("3. Level 5")
+
+        status_choice = get_number("\nSelect mastery status: ")
+
+        statuses = {
+            1: "Unmastered",
+            2: "Mastered",
+            3: "Level 5",
+        }
+
+        if status_choice not in statuses:
+            print("Invalid mastery status.")
+            pause()
+            continue
+
+        first_edition = get_yes_no(
+            "Is this a First Edition (FE)? (Y/N): "
+        )
+
+        won_match = get_yes_no(
+            "Did you win a match with this Sprite (WM)? (Y/N): "
+        )
+
+        collection.add_sprite(
+            variant,
+            status=statuses[status_choice],
+            first_edition=first_edition,
+            won_match=won_match,
+        )
+
+        pause()
 
 
-def choose_variant(sprite):
-    """Display available variants for a selected Sprite."""
+# ==========================================
+# OWNED SPRITE SELECTION
+# ==========================================
 
-    available = [
-        variant for variant in sprite.variants
-        if variant.status == "Available"
-    ]
+def select_owned_sprite():
+    """Allow the user to select an owned Sprite by number."""
 
-    if not available:
-        print("No available variants for this Sprite.")
+    if not collection.collection["owned"]:
+        print("\nYour collection is empty.")
         return None
 
-    print(f"\n{sprite.name} Variants:")
+    print_header("YOUR OWNED SPRITES")
 
-    for index, variant in enumerate(available, start=1):
-        print(f"{index}. {variant.name}")
+    for entry in sorted(
+            collection.collection["owned"],
+            key=lambda item: item["number"]
+    ):
+        print(
+            f"{entry['number']:>3}  "
+            f"{entry['name']} - {entry['variant']} "
+            f"[{entry['status']}]"
+        )
 
-    print("0. Cancel")
+    print("\n[0] Back")
 
-    while True:
-        choice = input("\nSelect a variant: ").strip()
+    number = get_number("\nEnter Sprite number: ")
 
-        if not choice.isdigit():
-            print("Please enter a valid number.")
-            continue
-
-        choice = int(choice)
-
-        if choice == 0:
-            return None
-
-        if 1 <= choice <= len(available):
-            return available[choice - 1]
-
-        print("Invalid selection.")
-
-
-def choose_status():
-    """Let the user select a mastery status."""
-
-    print("\nMastery Status:")
-
-    for index, status in enumerate(STATUSES, start=1):
-        print(f"{index}. {status}")
-
-    print("0. Cancel")
-
-    while True:
-        choice = input("\nSelect a status: ").strip()
-
-        if not choice.isdigit():
-            print("Please enter a valid number.")
-            continue
-
-        choice = int(choice)
-
-        if choice == 0:
-            return None
-
-        if 1 <= choice <= len(STATUSES):
-            return STATUSES[choice - 1]
-
-        print("Invalid selection.")
-
-
-def choose_owned_variant():
-    """Display owned variants grouped by Sprite."""
-
-    owned_variants = []
-
-    print("\nOwned Sprite Variants:")
-
-    index = 1
-
-    for sprite in ALL_SPRITES:
-
-        sprite_entries = []
-
-        for variant in sprite.variants:
-            entry = find_owned(sprite.name, variant.name)
-
-            if entry is not None:
-                sprite_entries.append((variant, entry))
-
-        if not sprite_entries:
-            continue
-
-        print(f"\n{sprite.name}:")
-
-        for variant, entry in sprite_entries:
-
-            print(
-                f"{index}. {variant.name} "
-                f"({entry['status']})"
-            )
-
-            owned_variants.append(
-                (sprite.name, variant.name)
-            )
-
-            index += 1
-
-    if not owned_variants:
-        print("You don't own any Sprite variants.")
+    if number == 0:
         return None
 
-    print("0. Cancel")
+    variant = sprites.get_variant(number)
 
-    while True:
-        choice = input("\nSelect an owned variant: ").strip()
+    if variant is None or not collection.is_owned(variant):
+        print("That Sprite is not in your collection.")
+        pause()
+        return None
 
-        if not choice.isdigit():
-            print("Please enter a valid number.")
-            continue
-
-        choice = int(choice)
-
-        if choice == 0:
-            return None
-
-        if 1 <= choice <= len(owned_variants):
-            return owned_variants[choice - 1]
-
-        print("Invalid selection.")
+    return variant
 
 
-# --------------------------------------------------
-# COLLECTION ACTIONS
-# --------------------------------------------------
+# ==========================================
+# EDIT OWNED SPRITE
+# ==========================================
 
-def add_to_collection():
-    """Add a Sprite variant to the collection."""
+def edit_mastery(variant):
+    """Change the mastery status of an owned Sprite."""
 
-    sprite = choose_sprite()
+    entry = collection.find_owned(variant)
 
-    if sprite is None:
+    if entry is None:
         return
 
-    variant = choose_variant(sprite)
+    print_header("EDIT MASTERY")
+
+    print(f"Sprite: {variant.display_name}")
+    print(f"Current Status: {entry['status']}")
+
+    print("\n1. Unmastered")
+    print("2. Mastered")
+    print("3. Level 5")
+    print("0. Back")
+
+    choice = get_number("\nNew status: ")
+
+    statuses = {
+        1: "Unmastered",
+        2: "Mastered",
+        3: "Level 5",
+    }
+
+    if choice == 0:
+        return
+
+    if choice not in statuses:
+        print("Invalid selection.")
+        return
+
+    collection.update_status(variant, statuses[choice])
+
+
+def edit_first_edition(variant):
+    """Toggle First Edition."""
+
+    entry = collection.find_owned(variant)
+
+    if entry is None:
+        return
+
+    current = entry["first_edition"]
+
+    print(f"\nFirst Edition: {'Yes' if current else 'No'}")
+
+    new_value = get_yes_no(
+        "Set First Edition to Yes? (Y/N): "
+    )
+
+    collection.update_first_edition(variant, new_value)
+
+    print("First Edition updated.")
+
+
+def edit_won_match(variant):
+    """Toggle Won Match."""
+
+    entry = collection.find_owned(variant)
+
+    if entry is None:
+        return
+
+    current = entry["won_match"]
+
+    print(f"\nWon Match: {'Yes' if current else 'No'}")
+
+    new_value = get_yes_no(
+        "Set Won Match to Yes? (Y/N): "
+    )
+
+    collection.update_won_match(variant, new_value)
+
+    print("Won Match updated.")
+
+
+def edit_sprite_menu():
+    """Choose an owned Sprite and edit its attributes."""
+
+    while True:
+        print_header("EDIT OWNED SPRITE")
+
+        variant = select_owned_sprite()
+
+        if variant is None:
+            return
+
+        while True:
+            entry = collection.find_owned(variant)
+
+            print_header("SPRITE ATTRIBUTES")
+
+            print(f"Sprite: {variant.display_name}")
+            print(f"Mastery: {entry['status']}")
+            print(
+                f"First Edition: "
+                f"{'Yes' if entry['first_edition'] else 'No'}"
+            )
+            print(
+                f"Won Match: "
+                f"{'Yes' if entry['won_match'] else 'No'}"
+            )
+
+            print("\n1. Edit Mastery")
+            print("2. Edit First Edition")
+            print("3. Edit Won Match")
+            print("4. Record Trade / Loss")
+            print("0. Back")
+
+            choice = get_number("\nSelection: ")
+
+            if choice == 0:
+                break
+
+            elif choice == 1:
+                edit_mastery(variant)
+
+            elif choice == 2:
+                edit_first_edition(variant)
+
+            elif choice == 3:
+                edit_won_match(variant)
+
+            elif choice == 4:
+                if get_yes_no(
+                        "Record this Sprite as traded or lost? (Y/N): "
+                ):
+                    collection.record_trade(variant)
+
+            else:
+                print("Invalid selection.")
+
+            pause()
+
+
+# ==========================================
+# COLLECTION
+# ==========================================
+
+def view_collection_menu():
+    """Display the personal Sprite collection."""
+
+    collection.display_collection()
+
+    pause()
+
+def collection_statistics_menu():
+    """Display collection statistics."""
+
+    stats = collection.get_collection_stats()
+
+    print_header("COLLECTION STATISTICS")
+
+    print(f"Total Owned:       {stats['total']}")
+    print(f"Unmastered:        {stats['unmastered']}")
+    print(f"Mastered:          {stats['mastered']}")
+    print(f"Level 5:           {stats['level_5']}")
+
+    print(SHORT_LINE)
+
+    print(f"First Edition:     {stats['first_edition']}")
+    print(f"Won Match:         {stats['won_match']}")
+
+    print(SHORT_LINE)
+
+    print(f"Database Sprites:  {sprites.count_sprites()}")
+    print(f"Database Variants: {sprites.count_variants()}")
+
+    pause()
+
+
+# ==========================================
+# TRADE ADVERTISEMENT
+# ==========================================
+
+def trade_ad_menu():
+    """Generate and display the collection trade advertisement."""
+
+    print_header("TRADE ADVERTISEMENT")
+
+    collection.display_trade_ad()
+
+    print("\nYou can copy the advertisement above.")
+
+    pause()
+
+
+# ==========================================
+# REMOVE SPRITE
+# ==========================================
+
+def remove_sprite_menu():
+    """Remove a Sprite record after confirmation."""
+
+    print_header("REMOVE SPRITE")
+
+    variant = select_owned_sprite()
 
     if variant is None:
         return
 
-    status = choose_status()
+    if get_yes_no(
+            f"Remove {variant.display_name} from your collection? (Y/N): "
+    ):
+        collection.remove_sprite(variant)
 
-    if status is None:
-        return
-
-    add_sprite(sprite.name, variant.name, status)
-
-
-def change_mastery():
-    """Update the mastery status of an owned variant."""
-
-    selected = choose_owned_variant()
-
-    if selected is None:
-        return
-
-    sprite_name, variant_name = selected
-
-    status = choose_status()
-
-    if status is None:
-        return
-
-    update_status(sprite_name, variant_name, status)
+    pause()
 
 
-def trade_sprite():
-    """Record a trade involving an owned variant."""
+# ==========================================
+# RESET COLLECTION
+# ==========================================
 
-    selected = choose_owned_variant()
-
-    if selected is None:
-        return
-
-    sprite_name, variant_name = selected
-
-    record_trade(sprite_name, variant_name)
-
-
-def delete_sprite():
-    """Remove an owned variant from the collection."""
-
-    selected = choose_owned_variant()
-
-    if selected is None:
-        return
-
-    sprite_name, variant_name = selected
-
-    remove_sprite(sprite_name, variant_name)
-
-
-def clear_collection():
+def reset_collection_menu():
     """Reset the entire collection after confirmation."""
 
-    print("\nWARNING: This will remove every owned Sprite variant.")
+    print_header("RESET COLLECTION")
 
-    confirmation = input(
-        "Are you sure you want to reset your collection? (y/n): "
-    ).strip().lower()
+    print("WARNING: This will remove every owned Sprite record.")
 
-    if confirmation == "y":
-        reset_collection()
+    if get_yes_no("\nAre you absolutely sure? (Y/N): "):
+        if get_yes_no("Confirm collection reset? (Y/N): "):
+            collection.reset_collection()
 
-    elif confirmation == "n":
-        print("Collection reset cancelled.")
-
-    else:
-        print("Invalid confirmation. Collection was not reset.")
+    pause()
 
 
-# --------------------------------------------------
+# ==========================================
 # MAIN MENU
-# --------------------------------------------------
+# ==========================================
 
-def display_menu():
-    """Display the main application menu."""
+def display_main_menu():
+    print_header(f"{APP_NAME} v{APP_VERSION}")
 
-    print("\n" + "=" * 40)
-    print("                MAIN MENU")
-    print("=" * 40)
-
-    print("1. Display Collection")
+    print("\nCOLLECTION")
+    print("1. View Collection")
     print("2. Add Sprite")
-    print("3. Update Mastery")
-    print("4. Record Trade")
-    print("5. Remove Sprite")
-    print("6. Reset Collection")
-    print("7. Exit")
+    print("3. Edit Owned Sprite")
 
+    print("\nSPRITE DATABASE")
+    print("4. Browse Sprite Database")
 
-# --------------------------------------------------
-# APPLICATION
-# --------------------------------------------------
+    print("\nTRADING")
+    print("5. Create Trade Advertisement")
+
+    print("\nMANAGEMENT")
+    print("6. Collection Statistics")
+    print("7. Remove Sprite")
+    print("8. Reset Collection")
+
+    print("\n0. Exit")
+
+    print("\n" + LINE)
+
 
 def main():
-    """Start Sprite Trade Manager."""
+    print_header(f"{APP_NAME} v{APP_VERSION}")
 
-    # Initialize collection and handle save recovery.
-    initialize_collection()
+    print("Initializing collection...")
 
-    # Display application information.
-    print("\n" + "=" * 60)
-    print(f"{APP_NAME} v{APP_VERSION}")
-    print(f"Supporting Fortnite {SUPPORTED_SEASON}")
-    print("=" * 60)
+    try:
+        backup.initialize_collection()
 
-    # Main application loop.
+        if not collection.load_collection():
+            print("\nUnable to load your collection.")
+            print("Please check your save file and backup.")
+            return
+
+    except Exception as error:
+        print(f"\nStartup error: {error}")
+        print("The application will now close.")
+        return
+
+    print("Collection loaded successfully!")
+
+    pause()
+
     while True:
 
-        display_menu()
+        display_main_menu()
 
-        choice = input("\nSelect an option: ").strip()
+        choice = get_number("Select an option: ")
 
-        if choice == "1":
-            display_collection()
-
-        elif choice == "2":
-            add_to_collection()
-
-        elif choice == "3":
-            change_mastery()
-
-        elif choice == "4":
-            trade_sprite()
-
-        elif choice == "5":
-            delete_sprite()
-
-        elif choice == "6":
-            clear_collection()
-
-        elif choice == "7":
-            print("\nThank you for using Sprite Trade Manager!")
-            print("Goodbye!")
+        if choice == 0:
+            print("\nThanks for using Sprite Trade Manager!")
             break
 
+        elif choice == 1:
+            view_collection_menu()
+
+        elif choice == 2:
+            add_sprite_menu()
+
+        elif choice == 3:
+            edit_sprite_menu()
+
+        elif choice == 4:
+            sprite_database_menu()
+
+        elif choice == 5:
+            trade_ad_menu()
+
+        elif choice == 6:
+            collection_statistics_menu()
+
+        elif choice == 7:
+            remove_sprite_menu()
+
+        elif choice == 8:
+            reset_collection_menu()
+
         else:
-            print("\nInvalid selection. Please choose 1-7.")
+            print("Invalid selection.")
+            pause()
 
 
-# --------------------------------------------------
+# ==========================================
 # PROGRAM ENTRY POINT
-# --------------------------------------------------
+# ==========================================
 
 if __name__ == "__main__":
     main()
