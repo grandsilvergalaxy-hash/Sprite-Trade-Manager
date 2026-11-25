@@ -1,9 +1,9 @@
 
 # ==========================================
-# Sprite Database
+# Sprite Database Configuration
 # ==========================================
 
-SPRITE_DATABASE_VERSION = 3
+SPRITE_DATABASE_VERSION = 4
 
 
 # ==========================================
@@ -18,6 +18,8 @@ CURSED_ABILITY = (
     "Increases chance of rare Sprite variants, "
     "water damages you."
 )
+
+GOLD_ABILITY = "Gain 3x bonus XP from eliminations."
 
 
 # ==========================================
@@ -36,6 +38,7 @@ class SpriteVariant:
     @property
     def display_name(self):
         """Return the complete variant name."""
+
         if self.name == "Base":
             return self.sprite_name
 
@@ -50,7 +53,7 @@ class SpriteVariant:
 # ==========================================
 
 def standard_variants(base_number):
-    """Return Base, Fortune, and Cursed variants."""
+    """Return Base, Fortune, Cursed, and Gold variants."""
 
     return [
         SpriteVariant(
@@ -67,6 +70,11 @@ def standard_variants(base_number):
             "Cursed",
             CURSED_ABILITY
         ),
+        SpriteVariant(
+            base_number + 3,
+            "Gold",
+            GOLD_ABILITY
+        )
     ]
 
 
@@ -219,17 +227,12 @@ lil_squibbly = EpicSprite(
     29
 )
 
-
-# ==========================================
-# Mythic Sprites
-# ==========================================
-
-sweet_dreams = MythicSprite(
-    "Sweet Dreams",
-    "Loot",
-    "Provides a random item at every level and Mythic loot at max level.",
-    33,
-    variants=base_only(33)
+squiplash = EpicSprite(
+    "Squiplash",
+    "Healing and survivability",
+    "Deploys a Healing Smoke Bomb at low health. "
+    "Decreased cooldown and increased duration and healing with each Level Up!",
+    33
 )
 
 
@@ -251,11 +254,13 @@ lil_uzi_vert_jr = LegendarySprite(
     41
 )
 
-plundarrgh = MythicSprite(
-    "Plundarrgh",
-    "Aggressive looting",
-    "Opening a chest boosts pickaxe and movement speed.",
-    49
+sir_oscar_the_second = LegendarySprite(
+    "Sir Oscar The Second",
+    "Melee combat",
+    "Grants increased Pickaxe damage and a temporary speed boost "
+    "when your shield breaks. Increased Pickaxe damage and speed "
+    "boost with each Level Up!",
+    45
 )
 
 transponder_snail = LegendarySprite(
@@ -264,6 +269,43 @@ transponder_snail = LegendarySprite(
     "Provides extra resources from pickups, shared with equipped teammates.",
     57,
     variants=base_only(57)
+)
+
+
+# ==========================================
+# Mythic Sprites
+# ==========================================
+
+plundarrgh = MythicSprite(
+    "Plundarrgh",
+    "Aggressive looting",
+    "Opening a chest boosts pickaxe and movement speed.",
+    49
+)
+
+mini_miku = MythicSprite(
+    "Mini Miku",
+    "Team support",
+    "Grants a Friendship Bubble when emoting with other players. "
+    "Decreased cooldown with each Level Up!",
+    53
+)
+
+sweet_dreams = MythicSprite(
+    "Sweet Dreams",
+    "Loot",
+    "Provides a random item at every level and Mythic loot at max level.",
+    58,
+    variants=base_only(58)
+)
+
+zee = MythicSprite(
+    "Zee",
+    "Mobility",
+    "Grants regenerating Zero Point dash charges. "
+    "Max charges increase and recharge time decrease with Level Up!",
+    59,
+    variants=base_only(59)
 )
 
 
@@ -281,14 +323,19 @@ ALL_SPRITES = [
     kelper,
     exmarks,
     lil_squibbly,
+    squiplash,
 
     sweet_dreams,
 
     lil_flacko,
     lil_uzi_vert_jr,
+    sir_oscar_the_second,
+
     plundarrgh,
+    mini_miku,
 
     transponder_snail,
+    zee
 ]
 
 

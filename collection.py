@@ -33,6 +33,15 @@ collection = {
 
 
 # --------------------------------------------------
+# SORT COLLECTION
+# --------------------------------------------------
+
+def sort_collection():
+    """Sort owned Sprite records by permanent numeric ID."""
+    collection["owned"].sort(key=lambda entry: entry["number"])
+
+
+# --------------------------------------------------
 # SAVE VALIDATION
 # --------------------------------------------------
 
@@ -140,6 +149,8 @@ def load_collection():
     collection["owned"].clear()
     collection["owned"].extend(data["owned"])
 
+    sort_collection()
+
     return True
 
 
@@ -149,6 +160,8 @@ def load_collection():
 
 def save_collection():
     """Save the current collection to disk."""
+
+    sort_collection()
 
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -244,6 +257,7 @@ def add_sprite(
     }
 
     collection["owned"].append(entry)
+    sort_collection()
 
     if not save_collection():
         collection["owned"].remove(entry)
@@ -388,6 +402,7 @@ def remove_sprite(variant):
 
     if not save_collection():
         collection["owned"].append(entry)
+        sort_collection()
         return False
 
     print(
